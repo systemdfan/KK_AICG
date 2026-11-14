@@ -65,11 +65,24 @@ test('buildLlmResponseMessage wraps into protocol envelope', () => {
     assert.deepStrictEqual(m.stats, { affection: 1 });
 });
 
+test('desire tags parsed separately from stats', () => {
+    const r = parseLlmResponse('[emotion:aroused] Я так хочу тебя... [desire:horny+20] [desire:lesbian+10]');
+    assert.deepStrictEqual(r.desires, { horny: 20, lesbian: 10 });
+    assert.deepStrictEqual(r.stats, {});
+    assert.strictEqual(r.text, 'Я так хочу тебя...');
+});
+
+test('desire deltas accumulate', () => {
+    const r = parseLlmResponse('а [desire:horny+10] б [desire:horny+15] [desire:horny-5]');
+    assert.strictEqual(r.desires.horny, 20);
+});
+
 test('non-string input is safe', () => {
     const r = parseLlmResponse(null);
     assert.strictEqual(r.text, '');
     assert.deepStrictEqual(r.commands, {});
     assert.deepStrictEqual(r.stats, {});
+    assert.deepStrictEqual(r.desires, {});
 });
 
 console.log(`\n${passed} tests passed.`);

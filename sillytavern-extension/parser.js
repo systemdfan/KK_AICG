@@ -18,18 +18,22 @@ const COMMAND_BLOCK_RE = /\[((?:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+)(?:\|[A-Za-z0-9_
 // Matches [stat:name+2] / [stat:name-1]
 const STAT_RE = /\[stat:([A-Za-z0-9_.-]+)([+-]\d+)\]/g;
 
+// Matches [desire:name+20] / [desire:name-10] (NPC desire changes)
+const DESIRE_RE = /\[desire:([A-Za-z0-9_.-]+)([+-]\d+)\]/g;
+
 /**
  * Parse a raw LLM reply into structured data.
  * @param {string} raw Raw LLM output.
- * @returns {{ text: string, commands: Object<string,string>, stats: Object<string,number> }}
+ * @returns {{ text: string, commands: Object<string,string>, stats: Object<string,number>, desires: Object<string,number> }}
  */
 function parseLlmResponse(raw) {
     if (typeof raw !== 'string') {
-        return { text: '', commands: {}, stats: {} };
+        return { text: '', commands: {}, stats: {}, desires: {} };
     }
 
     const commands = {};
     const stats = {};
+    const desires = {};
     let text = raw;
 
     // 1. Extract stat tags first (they may appear anywhere, including inside text).
@@ -37,6 +41,14 @@ function parseLlmResponse(raw) {
         const value = parseInt(delta, 10);
         if (Number.isNaN(value)) return match; // shouldn't happen given the regex, but be safe
         stats[name] = (stats[name] || 0) + value;
+        return ' ';
+    });
+
+    // 1b. Extract desire tags ([desire:horny+20]) the same way.
+    text = text.replace(DESIRE_RE, (match, name, delta) => {
+        const value = parseInt(delta, 10);
+        if (Number.isNaN(value)) return match;
+        desires[name] = (desires[name] || 0) + value;
         return ' ';
     });
 
@@ -55,7 +67,7 @@ function parseLlmResponse(raw) {
     // 3. Clean up whitespace left by stripped tags.
     text = text.replace(/\s{2,}/g, ' ').trim();
 
-    return { text, commands, stats };
+    return { text, commands, stats, desires };
 }
 
 /**
@@ -68,6 +80,7 @@ function buildLlmResponseMessage(raw) {
         text: parsed.text,
         commands: parsed.commands,
         stats: parsed.stats,
+        desires: parsed.desires,
     };
 }
 

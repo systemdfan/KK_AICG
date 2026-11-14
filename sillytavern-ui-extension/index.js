@@ -18,6 +18,31 @@ const RECONNECT_MS = 3000;
 const PROTECTION_KEY = 'kkaicg_protection';
 const PROTECTION_DEPTH = 1; // messages from the end of the chat
 
+// Live NPC state: injected as a system extension prompt before each generation,
+// so the LLM always knows time, location, outfit, desires, stats and traits.
+const CONTEXT_KEY = 'kkaicg_context';
+const CONTEXT_DEPTH = 1;
+
+// Koikatsu daily cycle (Cycle.Type) -> readable schedule time for the LLM.
+const TIME_OF_DAY = {
+    WakeUp: 'early morning (just woke up)',
+    Morning: 'morning',
+    GotoSchool: 'walking to school',
+    HR1: 'first homeroom',
+    Lesson1: 'first lesson',
+    LunchTime: 'lunch break',
+    Lesson2: 'second lesson',
+    HR2: 'afternoon homeroom',
+    StaffTime: 'after classes (staff time)',
+    AfterSchool: 'after school / club time',
+    GotoMyHouse: 'heading home',
+    MyHouse: 'at home (evening)',
+};
+
+function describeTimeOfDay(t) {
+    return (t && TIME_OF_DAY[t]) ? TIME_OF_DAY[t] : (t || 'unknown');
+}
+
 let ws = null;
 let awaitingReply = false;
 let busy = false;
@@ -26,6 +51,47 @@ let busy = false;
 function decodeBase64Utf8(b64) {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Build the live game-state context string from the player_message character block.
+ * The LLM uses it for roleplay grounding and OOC questions.
+ */
+function buildStateContext(character) {
+    if (!character || !character.name) return '';
+
+    const lines = [];
+    const loc = character.location;
+    if (loc) {
+        let s = `Time of day: ${describeTimeOfDay(loc.timeOfDay)}. Location: ${loc.mapName ?? 'unknown'}.`;
+        if (loc.action) s += ` Activity: ${loc.action}.`;
+        lines.push(s);
+    }
+    if (character.clothes) lines.push(`Current outfit: ${character.clothes}.`);
+
+    const stats = character.stats;
+    if (stats) {
+        lines.push(`Feelings: affection=${stats.favor ?? 0}, arousal/lewdness=${stats.lewdness ?? 0}, anger=${stats.anger ?? 0}, intimacy=${stats.intimacy ?? 0}, H count=${stats.hCount ?? 0}.`);
+    }
+    if (typeof character.relation === 'number') lines.push(`Relation level: ${character.relation}.`);
+    if (character.sexExperience) lines.push(`Sexual experience: ${character.sexExperience}.`);
+    if (character.isDate) lines.push('Currently on a date.');
+    if (character.isLunch) lines.push('Had lunch together today.');
+    if (character.isAnger) lines.push('Currently angry.');
+
+    const desires = character.desires;
+    if (desires && Object.keys(desires).length > 0) {
+        const parts = Object.entries(desires).map(([k, v]) => `${k}=${v}`);
+        lines.push(`Desires: ${parts.join(', ')}.`);
+    }
+    const traits = character.traits;
+    if (Array.isArray(traits) && traits.length > 0) {
+        lines.push(`Traits: ${traits.join(', ')}.`);
+    }
+
+    if (lines.length === 0) return '';
+    return `[Live game state of ${character.name}. Use it for roleplay; when asked OOC questions (e.g. "where are we?"), answer from this data. Do not dump it unprompted.]
+` + lines.join('\n');
 }
 
 /** True while the protection extension prompt is set. */
@@ -93,6 +159,13 @@ async function handlePlayerMessage(msg) {
     try {
         // Author Protection Mode: keep a system-level extension prompt set for the
         // whole restricted session; clear it as soon as a non-protected message arrives.
+        // Live game state -> extension prompt, refreshed before every generation.
+        const context = buildStateContext(msg.character);
+        if (context) {
+            setExtensionPrompt(CONTEXT_KEY, context, extension_prompt_types.IN_CHAT, CONTEXT_DEPTH, false);
+            log('Game state context updated:', msg.character.name);
+        }
+
         const protection = msg.character && msg.character.protection;
         if (protection && protection.active && protection.promptB64) {
             const prompt = decodeBase64Utf8(protection.promptB64);

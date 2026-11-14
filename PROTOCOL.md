@@ -65,23 +65,43 @@ Generation problem. `error`: `busy` | `no_character` | `generation_stopped` | an
 
 ### player_message
 Player typed a message in the in-game chat UI.
+The `character` block carries the full live NPC state (see NpcState.cs):
 ```json
 {
   "type": "player_message",
   "text": "Привет, Мизуки!",
   "character": {
     "name": "Mizuki",
+    "personality": 25,
     "stCard": "Mizuki.yaml",
-    "stats": {
-      "affection": 12,
-      "trust": 8,
-      "arousal": 0,
-      "anger": 0
+    "stats": { "favor": 12, "lewdness": 0, "anger": 0, "intimacy": 8, "hCount": 0 },
+    "relation": 0,
+    "isAnger": false,
+    "isDate": false,
+    "isLunch": false,
+    "isFirstGirlfriend": false,
+    "sexExperience": "virgin|inexperienced|experienced|lewd",
+    "isVirgin": true,
+    "isAnalVirgin": true,
+    "traits": ["lazy", "likes_girls"],
+    "location": {
+      "timeOfDay": "LunchTime",
+      "mapNo": 45,
+      "mapName": "屋上",
+      "playerMapNo": 10,
+      "actionNo": 7,
+      "action": "talk"
     },
-    "sexExperience": "virgin"
+    "desires": { "horny": 20, "lesbian": 10, "raw_6": 0 }
   }
 }
 ```
+Trait aliases: frequent_pee (頻尿), gluttonous, dense, easy, bitchy, sulky, bookworm,
+music_lover, frank, submissive, friendly, clean_freak, lazy (怠惰), sinsyutu, loner,
+sporty, serious, likes_girls.
+Desire aliases: horny (game desire no 5), shame (4), lesbian (26), h_join (30);
+unknown numbers appear as `raw_<no>`.
+Stat names for [stat:...] tags: affection|favor, trust|intimacy, arousal|lewdness, anger.
 
 ### system_note
 Game event the LLM should know about (phone call, scene change, etc.).
@@ -111,6 +131,9 @@ Parsed LLM reply. `commands` fields are optional; unknown ones are ignored by th
   },
   "stats": {
     "affection": "+2"
+  },
+  "desires": {
+    "horny": "+10"
   }
 }
 ```
@@ -124,6 +147,8 @@ Raw LLM output example:
 
 - Leading `[key:value|key:value]` block(s) — commands (emotion, pose, anything else).
 - `[stat:name+delta]` / `[stat:name-delta]` anywhere — stat changes (integers).
+- `[desire:name+delta]` / `[desire:name-delta]` anywhere — NPC desire changes
+  (aliases: horny, shame, lesbian, h_join; raw game numbers like `[desire:5+20]` also work).
 - Everything else — plain dialogue text, tags stripped.
 - Multiple command blocks allowed; later duplicates override earlier ones.
 - Malformed tags are left in text as-is (parser must be forgiving).

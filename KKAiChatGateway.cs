@@ -27,6 +27,7 @@ namespace KKAiChatGateway
 
         private ChatUI _chatUI;
         private NpcActor _npcActor;
+        private NpcState _npcState;
         private StateValidator _validator;
         private KeyResolver _keyResolver;
         private ConfigEntry<KeyboardShortcut> _toggleKey;
@@ -59,6 +60,7 @@ namespace KKAiChatGateway
 
             _npcActor = new NpcActor(Logger, Paths.ConfigPath);
             _npcActor.LoadMapping();
+            _npcState = new NpcState();
 
             _validator = new StateValidator();
             _keyResolver = new KeyResolver(Paths.ConfigPath, Logger);
@@ -277,8 +279,13 @@ namespace KKAiChatGateway
             }
             if (lower == "/help")
  {
-                _chatUI.AddSystemMessage("Команды: /dump — дампить доступные эмоции/позы в файл; " +
+                _chatUI.AddSystemMessage("Команды: /dump — доступные эмоции/позы; /state — состояние героини; " +
                     _toggleKey.Value + " — скрыть/показать окно; Esc — закрыть окно.");
+                return;
+            }
+            if (lower == "/state")
+            {
+                _chatUI.AddSystemMessage(BuildStateSummary());
                 return;
             }
             if (lower == "/close")
@@ -290,37 +297,67 @@ namespace KKAiChatGateway
             SendPlayerMessage(text);
         }
 
+        /// <summary>Human-readable current NPC state for the in-game /state command.</summary>
+        private string BuildStateSummary()
+        {
+            var heroine = _npcActor.GetCurrentHeroine();
+            if (heroine == null)
+                return "Нет активной героини (вне разговора).";
+
+            var block = _npcState.BuildCharacterBlock(heroine);
+            var sb = new System.Text.StringBuilder();
+            sb.Append(heroine.Name).Append(": favor=").Append(block["stats"]["favor"])
+              .Append(", lewdness=").Append(block["stats"]["lewdness"])
+              .Append(", anger=").Append(block["stats"]["anger"])
+              .Append(", intimacy=").Append(block["stats"]["intimacy"])
+              .Append(", HExp=").Append(block["sexExperience"]);
+            if (block.Keys.Contains("location"))
+            {
+                sb.Append(", место=").Append(block["location"]["mapName"])
+                  .Append(", действие=").Append(block["location"]["action"]);
+            }
+            if (block.Keys.Contains("desires"))
+            {
+                foreach (string key in block["desires"].Keys)
+                    sb.Append(", desire ").Append(key).Append("=").Append(block["desires"][key]);
+            }
+            if (block.Keys.Contains("traits"))
+            {
+                foreach (JsonData t in block["traits"])
+                    sb.Append(", trait ").Append((string)t);
+            }
+            return sb.ToString();
+        }
+
         /// <summary>Send a player chat message to SillyTavern (protocol: player_message).</summary>
         public void SendPlayerMessage(string text)
         {
             GetCurrentCharacterInfo(out var name, out var personality);
+            var heroine = _npcActor.GetCurrentHeroine();
             var authorized = _keyResolver.IsAuthorized();
             var policy = _validator.Evaluate(name, personality, authorized);
 
+            var characterBlock = _npcState.BuildCharacterBlock(heroine);
+            characterBlock["stCard"] = ""; // TODO: ExtendedData card link (Mizuki.yaml)
+
             if (policy.RequiresAuthorization)
             {
-                _chatUI.AddSystemMessage("Защищённый персонаж: активирован режим ограниченного взаимодействия.");
+                var protection = new JsonData();
+                protection["active"] = true;
+                protection["promptB64"] = policy.PromptB64;
+                characterBlock["protection"] = protection;
+
+                _chatUI.AddSystemMessage("Защищённый персонаж: активирован режим ограничанного взаимодействия.");
                 ApplyPolicyBias(policy);
             }
 
-            // TODO: fill full character info (KKAPI + ExtendedData card link, real stats).
-            SendJson(new
-            {
-                type = "player_message",
-                text = text,
-                character = new
-                {
-                    name = name,
-                    stCard = "",
-                    stats = new { affection = 0, trust = 0, arousal = 0, anger = 0 },
-                    sexExperience = "unknown",
-                    protection = policy.RequiresAuthorization ? new
-                    {
-                        active = true,
-                        promptB64 = policy.PromptB64
-                    } : null
-                },
-            });
+            // Build the whole message as JsonData: LitJson cannot serialize JsonData
+            // nested inside anonymous objects ("Can't close an object here").
+            var message = new JsonData();
+            message["type"] = "player_message";
+            message["text"] = text;
+            message["character"] = characterBlock;
+            SendJson(message);
         }
 
         private void ApplyPolicyBias(ValidationResult policy)
@@ -423,8 +460,25 @@ namespace KKAiChatGateway
 
             if (response.Emotion != null) _npcActor.ApplyEmotion(response.Emotion);
             if (response.Pose != null) _npcActor.ApplyPose(response.Pose);
-            foreach (var kv in response.StatDeltas)
-                ApplyStatDelta(kv.Key, kv.Value);
+
+            var heroine = _npcActor.GetCurrentHeroine();
+            if (heroine != null)
+            {
+                foreach (var kv in response.StatDeltas)
+                {
+                    Logger.LogInfo("[kkaicg] Applying stat change: " + kv.Key + " " + (kv.Value >= 0 ? "+" : "") + kv.Value);
+                    _npcState.ApplyStatDelta(heroine, kv.Key, kv.Value);
+                }
+                foreach (var kv in response.DesireDeltas)
+                {
+                    Logger.LogInfo("[kkaicg] Applying desire change: " + kv.Key + " " + (kv.Value >= 0 ? "+" : "") + kv.Value);
+                    _npcState.ApplyDesireDelta(heroine, kv.Key, kv.Value);
+                }
+            }
+            else
+            {
+                Logger.LogWarning("[kkaicg] Stat/desire changes skipped: no active heroine.");
+            }
         }
 
         private void ApplyEmotion(string emotion)
@@ -440,7 +494,8 @@ namespace KKAiChatGateway
         private void ApplyStatDelta(string stat, int delta)
         {
             Logger.LogInfo("[kkaicg] Applying stat change: " + stat + " " + (delta >= 0 ? "+" : "") + delta);
-            // TODO: modify NPC parameters (affection/trust/arousal/anger...).
+            var heroine = _npcActor.GetCurrentHeroine();
+            if (heroine != null) _npcState.ApplyStatDelta(heroine, stat, delta);
         }
 
         #endregion
@@ -461,6 +516,7 @@ namespace KKAiChatGateway
         public string Emotion;
         public string Pose;
         public readonly Dictionary<string, int> StatDeltas = new Dictionary<string, int>();
+        public readonly Dictionary<string, int> DesireDeltas = new Dictionary<string, int>();
 
         public static LlmResponse FromJson(JsonData msg)
         {
@@ -489,6 +545,17 @@ namespace KKAiChatGateway
                 }
             }
 
+            if (msg.Keys.Contains("desires") && msg["desires"].IsObject)
+            {
+                foreach (string key in msg["desires"].Keys)
+                {
+                    var v = msg["desires"][key];
+                    if (v.IsInt) r.DesireDeltas[key] = (int)v;
+                    else if (v.IsLong) r.DesireDeltas[key] = (int)(long)v;
+                    else if (v.IsDouble) r.DesireDeltas[key] = (int)(double)v;
+                }
+            }
+
             return r;
         }
 
@@ -498,6 +565,7 @@ namespace KKAiChatGateway
             if (Emotion != null) parts.Add("emotion=" + Emotion);
             if (Pose != null) parts.Add("pose=" + Pose);
             foreach (var kv in StatDeltas) parts.Add(kv.Key + (kv.Value >= 0 ? "+" : "") + kv.Value);
+            foreach (var kv in DesireDeltas) parts.Add("desire " + kv.Key + (kv.Value >= 0 ? "+" : "") + kv.Value);
             var suffix = parts.Count > 0 ? " [" + string.Join(", ", parts.ToArray()) + "]" : "";
             return "\"" + Text + "\"" + suffix;
         }
