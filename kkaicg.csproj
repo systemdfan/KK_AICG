@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net35</TargetFramework>
+    <AssemblyName>kkaicg</AssemblyName>
+    <Description>Koikatsu AI Chat Gateway</Description>
+    <Version>0.1.0</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>KKAiChatGateway</RootNamespace>
+    <Authors>systemdfag</Authors>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GameDir>C:\KKIRV2 R1.7\KKIRV2</GameDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="KKAPI\**\*.cs" />
+    <Compile Remove="koikatsuCode\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(GameDir)\BepInEx\core\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(GameDir)\BepInEx\core\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="KKAPI">
+      <HintPath>$(GameDir)\BepInEx\plugins\KKAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameDir)\Koikatu_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(GameDir)\Koikatu_Data\Managed\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(GameDir)\Koikatu_Data\Managed\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LitJson" Version="0.19.0" />
+    <PackageReference Include="WebSocketSharp" Version="1.0.3-rc11" />
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Copy SourceFiles="$(TargetPath);$(OutDir)websocket-sharp.dll;$(OutDir)LitJSON.dll" DestinationFolder="$(GameDir)\BepInEx\plugins" />
+    <Exec Command="echo Plugin copied to $(GameDir)\BepInEx\plugins" />
+  </Target>
+
+</Project>
