@@ -35,7 +35,8 @@ Player typed a message in the in-game chat UI.
       "arousal": 0,
       "anger": 0
     },
-    "sexExperience": "virgin"
+    "sexExperience": "virgin",
+    "protection": null
   }
 }
 ```

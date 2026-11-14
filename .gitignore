@@ -2,3 +2,7 @@ koikatsuCode
 KKAPI
 bin
 obj
+*.author
+private-key.xml
+public-key.xml
+tools

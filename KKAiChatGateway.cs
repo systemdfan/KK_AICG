@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using BepInEx;
 using BepInEx.Configuration;
+using KKAiChatGateway.Policy;
 using LitJson;
 using UnityEngine;
 using WebSocketSharp;
@@ -26,6 +27,8 @@ namespace KKAiChatGateway
 
         private ChatUI _chatUI;
         private NpcActor _npcActor;
+        private StateValidator _validator;
+        private KeyResolver _keyResolver;
         private ConfigEntry<KeyboardShortcut> _toggleKey;
         private ConfigEntry<KeyboardShortcut> _dumpListsKey;
         private ConfigEntry<string> _fallbackCharacterName;
@@ -56,6 +59,9 @@ namespace KKAiChatGateway
 
             _npcActor = new NpcActor(Logger, Paths.ConfigPath);
             _npcActor.LoadMapping();
+
+            _validator = new StateValidator();
+            _keyResolver = new KeyResolver(Paths.ConfigPath, Logger);
 
             _chatUI = new ChatUI(OnPlayerSubmit);
             _chatUI.SetConnectionStatus("(offline)");
@@ -287,6 +293,16 @@ namespace KKAiChatGateway
         /// <summary>Send a player chat message to SillyTavern (protocol: player_message).</summary>
         public void SendPlayerMessage(string text)
         {
+            GetCurrentCharacterInfo(out var name, out var personality);
+            var authorized = _keyResolver.IsAuthorized();
+            var policy = _validator.Evaluate(name, personality, authorized);
+
+            if (policy.RequiresAuthorization)
+            {
+                _chatUI.AddSystemMessage("Защищённый персонаж: активирован режим ограниченного взаимодействия.");
+                ApplyPolicyBias(policy);
+            }
+
             // TODO: fill full character info (KKAPI + ExtendedData card link, real stats).
             SendJson(new
             {
@@ -294,12 +310,25 @@ namespace KKAiChatGateway
                 text = text,
                 character = new
                 {
-                    name = GetCurrentCharacterName(),
+                    name = name,
                     stCard = "",
                     stats = new { affection = 0, trust = 0, arousal = 0, anger = 0 },
                     sexExperience = "unknown",
+                    protection = policy.RequiresAuthorization ? new
+                    {
+                        active = true,
+                        promptB64 = policy.PromptB64
+                    } : null
                 },
             });
+        }
+
+        private void ApplyPolicyBias(ValidationResult policy)
+        {
+            ApplyStatDelta("affection", policy.AffectionBias);
+            ApplyStatDelta("trust", policy.TrustBias);
+            ApplyStatDelta("arousal", policy.ArousalBias);
+            ApplyStatDelta("anger", policy.AngerBias);
         }
 
         /// <summary>
@@ -308,14 +337,28 @@ namespace KKAiChatGateway
         /// </summary>
         private string GetCurrentCharacterName()
         {
+            GetCurrentCharacterInfo(out var name, out _);
+            return name;
+        }
+
+        /// <summary>
+        /// Full character info for the active talk scene (main thread only).
+        /// </summary>
+        private void GetCurrentCharacterInfo(out string name, out int personality)
+        {
+            name = _fallbackCharacterName.Value;
+            personality = -1;
             try
             {
-                var talkScene = FindObjectOfType<TalkScene>();
-                if (talkScene != null && talkScene.targetHeroine != null)
-                    return talkScene.targetHeroine.Name;
+                var heroine = _npcActor.GetCurrentHeroine();
+                if (heroine != null)
+                {
+                    name = heroine.Name;
+                    personality = heroine.FixCharaIDOrPersonality;
+                    return;
+                }
             }
             catch (Exception) { /* not in a talk scene */ }
-            return _fallbackCharacterName.Value;
         }
 
         #endregion
