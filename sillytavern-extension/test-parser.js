@@ -77,12 +77,25 @@ test('desire deltas accumulate', () => {
     assert.strictEqual(r.desires.horny, 20);
 });
 
+test('action tags collected', () => {
+    const r = parseLlmResponse('[action:lunch_invite] Пошли поедим! [stat:affection+1]');
+    assert.deepStrictEqual(r.actions, ['lunch_invite']);
+    assert.strictEqual(r.text, 'Пошли поедим!');
+});
+
+test('multiple actions and desire+action mix', () => {
+    const r = parseLlmResponse('[action:date_invite] [desire:horny+10] Свидание! [action:h_invite]');
+    assert.deepStrictEqual(r.actions, ['date_invite', 'h_invite']);
+    assert.deepStrictEqual(r.desires, { horny: 10 });
+});
+
 test('non-string input is safe', () => {
     const r = parseLlmResponse(null);
     assert.strictEqual(r.text, '');
     assert.deepStrictEqual(r.commands, {});
     assert.deepStrictEqual(r.stats, {});
     assert.deepStrictEqual(r.desires, {});
+    assert.deepStrictEqual(r.actions, []);
 });
 
 console.log(`\n${passed} tests passed.`);

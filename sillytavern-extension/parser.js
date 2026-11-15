@@ -21,19 +21,23 @@ const STAT_RE = /\[stat:([A-Za-z0-9_.-]+)([+-]\d+)\]/g;
 // Matches [desire:name+20] / [desire:name-10] (NPC desire changes)
 const DESIRE_RE = /\[desire:([A-Za-z0-9_.-]+)([+-]\d+)\]/g;
 
+// Matches [action:date_invite] etc. (NPC in-game actions)
+const ACTION_RE = /\[action:([a-z_]+)\]/g;
+
 /**
  * Parse a raw LLM reply into structured data.
  * @param {string} raw Raw LLM output.
- * @returns {{ text: string, commands: Object<string,string>, stats: Object<string,number>, desires: Object<string,number> }}
+ * @returns {{ text: string, commands: Object, stats: Object, desires: Object, actions: Array }}
  */
 function parseLlmResponse(raw) {
     if (typeof raw !== 'string') {
-        return { text: '', commands: {}, stats: {}, desires: {} };
+        return { text: '', commands: {}, stats: {}, desires: {}, actions: [] };
     }
 
     const commands = {};
     const stats = {};
     const desires = {};
+    const actions = [];
     let text = raw;
 
     // 1. Extract stat tags first (they may appear anywhere, including inside text).
@@ -52,6 +56,12 @@ function parseLlmResponse(raw) {
         return ' ';
     });
 
+    // 1c. Extract action tags ([action:date_invite]).
+    text = text.replace(ACTION_RE, (match, name) => {
+        actions.push(name);
+        return ' ';
+    });
+
     // 2. Extract command blocks. "stat:..." tags were already handled above,
     //    so COMMAND_BLOCK_RE won't see them (they contain '+'/'-' which the value pattern rejects).
     text = text.replace(COMMAND_BLOCK_RE, (match, body) => {
@@ -67,7 +77,7 @@ function parseLlmResponse(raw) {
     // 3. Clean up whitespace left by stripped tags.
     text = text.replace(/\s{2,}/g, ' ').trim();
 
-    return { text, commands, stats, desires };
+    return { text, commands, stats, desires, actions };
 }
 
 /**
@@ -81,6 +91,7 @@ function buildLlmResponseMessage(raw) {
         commands: parsed.commands,
         stats: parsed.stats,
         desires: parsed.desires,
+        actions: parsed.actions,
     };
 }
 

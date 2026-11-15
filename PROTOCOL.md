@@ -149,6 +149,10 @@ Raw LLM output example:
 - `[stat:name+delta]` / `[stat:name-delta]` anywhere — stat changes (integers).
 - `[desire:name+delta]` / `[desire:name-delta]` anywhere — NPC desire changes
   (aliases: horny, shame, lesbian, h_join; raw game numbers like `[desire:5+20]` also work).
+- `[action:name]` anywhere — in-game character actions: date_invite, lunch_invite,
+  confess, girlfriend, breakup, club_invite, h_invite. Applied via vanilla-equivalent
+  effects (isDate, dateHeroine, isLunch, isGirlfriend, talkEvent...); each application
+  emits a `system_note` back so the LLM sees the real state change.
 - Everything else — plain dialogue text, tags stripped.
 - Multiple command blocks allowed; later duplicates override earlier ones.
 - Malformed tags are left in text as-is (parser must be forgiving).

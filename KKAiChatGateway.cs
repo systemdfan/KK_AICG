@@ -28,6 +28,7 @@ namespace KKAiChatGateway
         private ChatUI _chatUI;
         private NpcActor _npcActor;
         private NpcState _npcState;
+        private NpcAction _npcAction;
         private StateValidator _validator;
         private KeyResolver _keyResolver;
         private ConfigEntry<KeyboardShortcut> _toggleKey;
@@ -61,6 +62,7 @@ namespace KKAiChatGateway
             _npcActor = new NpcActor(Logger, Paths.ConfigPath);
             _npcActor.LoadMapping();
             _npcState = new NpcState();
+            _npcAction = new NpcAction(Logger, SendSystemNote);
 
             _validator = new StateValidator();
             _keyResolver = new KeyResolver(Paths.ConfigPath, Logger);
@@ -258,6 +260,17 @@ namespace KKAiChatGateway
             {
                 Logger.LogWarning("[kkaicg] Send failed: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Send a system_note to SillyTavern (called from the main thread).
+        /// </summary>
+        public void SendSystemNote(string text)
+        {
+            var message = new JsonData();
+            message["type"] = "system_note";
+            message["text"] = text;
+            SendJson(message);
         }
 
         /// <summary>Serialize an object to JSON and send it.</summary>
@@ -474,6 +487,11 @@ namespace KKAiChatGateway
                     Logger.LogInfo("[kkaicg] Applying desire change: " + kv.Key + " " + (kv.Value >= 0 ? "+" : "") + kv.Value);
                     _npcState.ApplyDesireDelta(heroine, kv.Key, kv.Value);
                 }
+                foreach (var action in response.Actions)
+                {
+                    var result = _npcAction.Apply(heroine, action);
+                    _chatUI.AddSystemMessage(result);
+                }
             }
             else
             {
@@ -517,6 +535,7 @@ namespace KKAiChatGateway
         public string Pose;
         public readonly Dictionary<string, int> StatDeltas = new Dictionary<string, int>();
         public readonly Dictionary<string, int> DesireDeltas = new Dictionary<string, int>();
+        public readonly List<string> Actions = new List<string>();
 
         public static LlmResponse FromJson(JsonData msg)
         {
@@ -556,6 +575,14 @@ namespace KKAiChatGateway
                 }
             }
 
+            if (msg.Keys.Contains("actions") && msg["actions"].IsArray)
+            {
+                foreach (JsonData a in msg["actions"])
+                {
+                    if (a.IsString) r.Actions.Add((string)a);
+                }
+            }
+
             return r;
         }
 
@@ -566,6 +593,7 @@ namespace KKAiChatGateway
             if (Pose != null) parts.Add("pose=" + Pose);
             foreach (var kv in StatDeltas) parts.Add(kv.Key + (kv.Value >= 0 ? "+" : "") + kv.Value);
             foreach (var kv in DesireDeltas) parts.Add("desire " + kv.Key + (kv.Value >= 0 ? "+" : "") + kv.Value);
+            foreach (var a in Actions) parts.Add("action " + a);
             var suffix = parts.Count > 0 ? " [" + string.Join(", ", parts.ToArray()) + "]" : "";
             return "\"" + Text + "\"" + suffix;
         }

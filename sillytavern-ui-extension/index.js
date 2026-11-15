@@ -8,7 +8,7 @@
  */
 // NOTE: user extensions are served at /scripts/extensions/third-party/<name>/,
 // so the app root (script.js) is FOUR levels up from this module.
-import { Generate, sendMessageAsUser, eventSource, event_types, chat, this_chid, name2, setExtensionPrompt, extension_prompt_types } from '../../../../script.js';
+import { Generate, sendMessageAsUser, eventSource, event_types, chat, this_chid, name2, setExtensionPrompt, extension_prompt_types, addOneMessage } from '../../../../script.js';
 
 const WS_URL = 'ws://127.0.0.1:8085';
 const RECONNECT_MS = 3000;
@@ -91,6 +91,7 @@ function buildStateContext(character) {
 
     if (lines.length === 0) return '';
     return `[Live game state of ${character.name}. Use it for roleplay; when asked OOC questions (e.g. "where are we?"), answer from this data. Do not dump it unprompted.]
+When you accept or propose a game event (date, lunch, club, intimacy, becoming a couple, breakup), you MUST append the matching [action:...] tag in the same reply, or the game will not register it.
 ` + lines.join('\n');
 }
 
@@ -104,6 +105,31 @@ function log(...args) {
 function send(payload) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(payload));
+    }
+}
+
+/**
+ * Inject a game system note into the chat: a small system message the LLM sees
+ * in history and that renders compactly in the UI (extra.isSmallSys).
+ */
+async function injectSystemNote(text) {
+    if (this_chid === undefined || this_chid === null) {
+        log('No chat open, system note dropped:', text);
+        return;
+    }
+    try {
+        await addOneMessage({
+            name: 'System',
+            is_user: false,
+            is_system: true,
+            is_name: true,
+            mes: text,
+            send_date: Date.now(),
+            extra: { isSmallSys: true, isKAICG: true },
+        });
+        log('System note injected into chat.');
+    } catch (err) {
+        console.error('[kkaicg-ui] System note injection failed:', err);
     }
 }
 
@@ -125,8 +151,8 @@ function connect() {
         if (msg.type === 'player_message') {
             await handlePlayerMessage(msg);
         } else if (msg.type === 'system_note') {
-            log('System note (not injected yet):', msg.text);
-            // TODO: inject into chat context (e.g. as a hidden system/Narrator message).
+            log('System note:', msg.text);
+            await injectSystemNote(String(msg.text ?? ''));
         }
     });
 
